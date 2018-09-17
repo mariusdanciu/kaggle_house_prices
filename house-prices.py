@@ -16,6 +16,8 @@ import math
 import warnings
 import matplotlib.pyplot as plt
 
+from scipy.stats import pearsonr
+
 
 from MLE import MultiLabelEncoder
 
@@ -42,6 +44,17 @@ testDf = pd.read_csv(testFile, header = 0)
 
 trainDf['MoSold'] = trainDf['MoSold'].apply(str)
 testDf['MoSold'] = testDf['MoSold'].apply(str)
+
+
+# trainDf['OverallQual'] = trainDf['OverallQual'].pow(3)
+# #trainDf['GrLivArea'] = trainDf['GrLivArea'].pow(3) #nope
+# trainDf['GarageCars'] = trainDf['GarageCars'].pow(2)
+# trainDf['GarageArea'] = trainDf['GarageArea'].pow(2)
+#
+# testDf['OverallQual'] = testDf['OverallQual'].pow(3)
+# #testDf['GrLivArea'] = testDf['GrLivArea'].pow(3)
+# testDf['GarageCars'] = testDf['GarageCars'].pow(2)
+# testDf['GarageArea'] = testDf['GarageArea'].pow(2)
 
 
 target = 'SalePrice'
@@ -87,6 +100,24 @@ def prepare_data():
     transformed = fit_pipeline.transform(training)
 
     return (fit_pipeline, pd.DataFrame(data = transformed, columns = training.columns), pd.DataFrame(data = testing, columns = testing.columns))
+
+
+def correlations(t_df):
+    correlations = {}
+    features = t_df.columns
+
+    for f in features:
+        if f != target:
+            x1 = t_df[f]
+            key = f + ' vs ' + target
+            correlations[key] = pearsonr(x1, Y)[0]
+
+
+    data_correlations = pd.DataFrame(correlations, index=['Value']).T
+    sorted_c = data_correlations.loc[data_correlations['Value'].abs().sort_values(ascending=False).index]
+
+    pd.set_option('display.max_rows', None)
+    print (sorted_c)
 
 
 def train(t_df):
@@ -168,6 +199,8 @@ def predict(model, testing, t_pipe):
 
 
 t_pipe, train_data, test_data = prepare_data()
+
+#correlations(train_data)
 
 model = train(train_data)
 
