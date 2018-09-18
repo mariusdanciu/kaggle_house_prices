@@ -46,15 +46,15 @@ trainDf['MoSold'] = trainDf['MoSold'].apply(str)
 testDf['MoSold'] = testDf['MoSold'].apply(str)
 
 
-# trainDf['OverallQual'] = trainDf['OverallQual'].pow(3)
+trainDf['OverallQual'] = trainDf['OverallQual'].pow(3)
 # #trainDf['GrLivArea'] = trainDf['GrLivArea'].pow(3) #nope
 # trainDf['GarageCars'] = trainDf['GarageCars'].pow(2)
-# trainDf['GarageArea'] = trainDf['GarageArea'].pow(2)
+trainDf['GarageArea'] = trainDf['GarageArea'].pow(2)
 #
-# testDf['OverallQual'] = testDf['OverallQual'].pow(3)
+testDf['OverallQual'] = testDf['OverallQual'].pow(3)
 # #testDf['GrLivArea'] = testDf['GrLivArea'].pow(3)
 # testDf['GarageCars'] = testDf['GarageCars'].pow(2)
-# testDf['GarageArea'] = testDf['GarageArea'].pow(2)
+testDf['GarageArea'] = testDf['GarageArea'].pow(2)
 
 
 target = 'SalePrice'
