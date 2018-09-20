@@ -31,15 +31,15 @@ testDf = pd.read_csv(testFile, header=0)
 trainDf['MoSold'] = trainDf['MoSold'].apply(str)
 testDf['MoSold'] = testDf['MoSold'].apply(str)
 
-#trainDf['OverallQual'] = trainDf['OverallQual'].pow(3)
+# trainDf['OverallQual'] = trainDf['OverallQual'].pow(3)
 # #trainDf['GrLivArea'] = trainDf['GrLivArea'].pow(3) #nope
 # trainDf['GarageCars'] = trainDf['GarageCars'].pow(2)
-#trainDf['GarageArea'] = trainDf['GarageArea'].pow(2)
+# trainDf['GarageArea'] = trainDf['GarageArea'].pow(2)
 #
-#testDf['OverallQual'] = testDf['OverallQual'].pow(3)
+# testDf['OverallQual'] = testDf['OverallQual'].pow(3)
 # #testDf['GrLivArea'] = testDf['GrLivArea'].pow(3)
 # testDf['GarageCars'] = testDf['GarageCars'].pow(2)
-#testDf['GarageArea'] = testDf['GarageArea'].pow(2)
+# testDf['GarageArea'] = testDf['GarageArea'].pow(2)
 
 target = 'SalePrice'
 
@@ -122,16 +122,11 @@ def cv(df, pipeline):
     return np.mean(iter_rmsle)
 
 
-def train(t_df, regularizations, make_pipeline):
+def train(t_df, make_pipelines):
     rmsles = []
     pipelines = []
 
-    for l in regularizations:
-        print("Training with lambda: ", l)
-        # Play more here
-
-        pipeline = make_pipeline(l)
-
+    for pipeline in make_pipelines():
         mean = cv(t_df, pipeline)
 
         print("Mean RMSLE: ", mean)
@@ -152,38 +147,45 @@ def train(t_df, regularizations, make_pipeline):
     return (best_model, rmsles)
 
 
-def decition_tree_regressor(l):
-    dtr = DecisionTreeRegressor(criterion='mse', max_depth=7, max_features=None,
+def decition_tree_regressor():
+    pipelines = []
+    est = DecisionTreeRegressor(criterion='mse', max_depth=7, max_features=None,
                                 max_leaf_nodes=None, min_impurity_decrease=0.0,
                                 min_impurity_split=None, min_samples_leaf=1,
                                 min_samples_split=2, min_weight_fraction_leaf=0.0,
                                 presort=False, random_state=0, splitter='best')
-    return Pipeline(steps=[
-        ('lr', dtr)])
+    pipelines.append(Pipeline(steps=[('lr', est)]))
+    return pipelines
 
 
-def xgb_regressor(l):
-    xgb_reg = xgboost.XGBRegressor(base_score=0.5, colsample_bylevel=1, colsample_bytree=0.7, gamma=0,
+def xgb_regressor():
+    pipelines = []
+    for l in [0, 0.5, 0.7, 1.0, 1.5, 2]:
+        est = xgboost.XGBRegressor(base_score=0.5, colsample_bylevel=1, colsample_bytree=0.7, gamma=0,
                                    learning_rate=0.05, max_delta_step=0, max_depth=5,
                                    min_child_weight=4, missing=None, n_estimators=500, nthread=-1,
                                    objective='reg:linear', reg_alpha=0, reg_lambda=l,
                                    scale_pos_weight=1, seed=0, silent=True, subsample=0.75)
 
-    return Pipeline(steps=[
-        ('lr', xgb_reg)])
+        pipelines.append(Pipeline(steps=[('lr', est)]))
+
+    return pipelines
 
 
-def ridge(l):
-    reg = Ridge(alpha=l, copy_X=False, fit_intercept=True, max_iter=None,
-                normalize=True, random_state=0, solver='auto', tol=0.001)
-    return Pipeline(steps=[
-        ('lr', reg)])
+def ridge():
+    pipelines = []
+    for l in [0, 0.5, 0.7, 1.0, 1.5, 2]:
+        est = Ridge(alpha=l, copy_X=False, fit_intercept=True, max_iter=None,
+                    normalize=True, random_state=0, solver='auto', tol=0.001)
+        pipelines.append(Pipeline(steps=[('lr', est)]))
+    return pipelines
 
 
-def linear(l):
-    reg = LinearRegression(normalize=True)
-    return Pipeline(steps=[
-        ('lr', reg)])
+def linear():
+    pipelines = []
+    est = LinearRegression(normalize=True)
+    pipelines.append(Pipeline(steps=[('lr', est)]))
+    return pipelines
 
 
 def predict(model, testing, t_pipe):
@@ -204,26 +206,28 @@ t_pipe, train_data, test_data = prepare_data()
 
 # correlations(train_data, )
 
-regs = [0, 0.5, 0.7, 1.0, 1.5, 2]
+xgb_model, rmsles1 = train(train_data, xgb_regressor)
 
-print("HAS NaN: ", train_data.isnull().sum())
+dt_model, rmsles2 = train(train_data, decition_tree_regressor)
 
-xgb_model, rmsles1 = train(train_data, regs, xgb_regressor)
+ridge_model, rmsles3 = train(train_data, ridge)
 
-dt_model, rmsles2 = train(train_data, regs, decition_tree_regressor)
+linear_model, rmsles4 = train(train_data, linear)
 
-ridge_model, rmsles3 = train(train_data, regs, ridge)
+min1 = np.min(rmsles1)
+min2 = np.min(rmsles2)
+min3 = np.min(rmsles3)
+min4 = np.min(rmsles4)
 
-linear_model, rmsles4 = train(train_data, regs, linear)
+labels = ['xgb', 'decision-tree', 'ridge', 'linear']
+mins = [min1, min2, min3, min4]
+index = np.arange(len(labels))
 
-plt.plot(regs, rmsles1, 'k-o',
-         regs, rmsles2, 'r-o',
-         regs, rmsles3, 'g-o',
-         regs, rmsles4, 'y-o'
-         )
-plt.legend(['xgb', 'decision-tree', 'ridge', 'linear'], loc='best')
-plt.xlabel('Lambda regularization')
+plt.bar(index, mins)
+
+plt.xlabel('Learners')
 plt.ylabel('RMSLE')
+plt.xticks(index, labels, fontsize=10)
 plt.show()
 
 # predict(xgb_model, test_data, t_pipe)
