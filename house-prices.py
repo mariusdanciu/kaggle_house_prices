@@ -9,6 +9,7 @@ from scipy.stats import pearsonr
 from sklearn.linear_model import Ridge, LinearRegression
 from sklearn.metrics import mean_squared_log_error
 from sklearn.model_selection import KFold
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import Imputer
 from sklearn.preprocessing import Normalizer
@@ -31,15 +32,15 @@ testDf = pd.read_csv(testFile, header=0)
 trainDf['MoSold'] = trainDf['MoSold'].apply(str)
 testDf['MoSold'] = testDf['MoSold'].apply(str)
 
-# trainDf['OverallQual'] = trainDf['OverallQual'].pow(3)
+trainDf['OverallQual'] = trainDf['OverallQual'].pow(2)
 # #trainDf['GrLivArea'] = trainDf['GrLivArea'].pow(3) #nope
-# trainDf['GarageCars'] = trainDf['GarageCars'].pow(2)
-# trainDf['GarageArea'] = trainDf['GarageArea'].pow(2)
+trainDf['GarageCars'] = trainDf['GarageCars'].pow(2)
+trainDf['GarageArea'] = trainDf['GarageArea'].pow(2)
 #
-# testDf['OverallQual'] = testDf['OverallQual'].pow(3)
+testDf['OverallQual'] = testDf['OverallQual'].pow(2)
 # #testDf['GrLivArea'] = testDf['GrLivArea'].pow(3)
-# testDf['GarageCars'] = testDf['GarageCars'].pow(2)
-# testDf['GarageArea'] = testDf['GarageArea'].pow(2)
+testDf['GarageCars'] = testDf['GarageCars'].pow(2)
+testDf['GarageArea'] = testDf['GarageArea'].pow(2)
 
 target = 'SalePrice'
 
@@ -80,8 +81,13 @@ def prepare_data():
 
     transformed = fit_pipeline.transform(training)
 
-    return (fit_pipeline, pd.DataFrame(data=transformed, columns=training.columns),
-            pd.DataFrame(data=testing, columns=testing.columns))
+    transformed_test = fit_pipeline.transform(testing)
+
+    print("T_TRAIN: ", transformed)
+    print("T_TEST: ", transformed_test)
+
+    return (pd.DataFrame(data=transformed, columns=training.columns),
+            pd.DataFrame(data=transformed_test, columns=testing.columns))
 
 
 def correlations(t_df):
@@ -147,7 +153,7 @@ def train(t_df, make_pipelines):
     return (best_model, rmsles)
 
 
-def decition_tree_regressor():
+def decision_tree_regressor():
     pipelines = []
     est = DecisionTreeRegressor(criterion='mse', max_depth=7, max_features=None,
                                 max_leaf_nodes=None, min_impurity_decrease=0.0,
@@ -188,12 +194,10 @@ def linear():
     return pipelines
 
 
-def predict(model, testing, t_pipe):
+def predict(model, testing):
     sp_id = testDf['Id']
 
-    testing_transformed = pd.DataFrame(data=t_pipe.transform(testing), columns=testing.columns)
-
-    pred = model.predict(testing_transformed)
+    pred = model.predict(testing)
 
     result = pd.DataFrame({'Id': sp_id, 'SalePrice': pred}, index=None)
 
@@ -202,17 +206,17 @@ def predict(model, testing, t_pipe):
     print("Submission file created")
 
 
-t_pipe, train_data, test_data = prepare_data()
+train_data, test_data = prepare_data()
 
-# correlations(train_data, )
-
-xgb_model, rmsles1 = train(train_data, xgb_regressor)
-
-dt_model, rmsles2 = train(train_data, decition_tree_regressor)
+cpy = train_data.copy()
 
 ridge_model, rmsles3 = train(train_data, ridge)
 
-linear_model, rmsles4 = train(train_data, linear)
+xgb_model, rmsles1 = train(cpy.copy(), xgb_regressor)
+
+dt_model, rmsles2 = train(cpy.copy(), decision_tree_regressor)
+
+linear_model, rmsles4 = train(cpy.copy(), linear)
 
 min1 = np.min(rmsles1)
 min2 = np.min(rmsles2)
@@ -230,4 +234,34 @@ plt.ylabel('RMSLE')
 plt.xticks(index, labels, fontsize=10)
 plt.show()
 
-# predict(xgb_model, test_data, t_pipe)
+train, valid, y_train, y_valid = train_test_split(cpy.copy(), Y, test_size=0.4)
+
+meta_validation = []
+meta_test = []
+
+for alg in [xgb_model, dt_model, ridge_model, linear_model]:
+    alg_model = alg.fit(train, y_train)
+
+    valid_pred = alg_model.predict(valid)
+    test_pred = alg_model.predict(test_data)
+
+    meta_validation.append(valid_pred)
+    meta_test.append(test_pred)
+
+stacked_valid = np.column_stack((meta_validation[0],
+                                 meta_validation[1],
+                                 meta_validation[2]))
+
+stacked_test = np.column_stack((meta_test[0],
+                                meta_test[1],
+                                meta_test[2]))
+
+print("Stacked valid data: ", stacked_valid)
+
+print("Stacked test data: ", stacked_test)
+
+meta_alg = LinearRegression()
+
+meta_model = meta_alg.fit(stacked_valid, y_valid)
+
+predict(meta_model, stacked_test)
