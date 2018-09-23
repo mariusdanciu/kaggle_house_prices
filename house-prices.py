@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import xgboost
 from scipy.stats import pearsonr
-from sklearn.linear_model import Ridge, LinearRegression
+from sklearn.linear_model import Ridge, LinearRegression, Lasso
 from sklearn.metrics import mean_squared_log_error
 from sklearn.model_selection import KFold
 from sklearn.model_selection import train_test_split
@@ -32,15 +32,15 @@ testDf = pd.read_csv(testFile, header=0)
 trainDf['MoSold'] = trainDf['MoSold'].apply(str)
 testDf['MoSold'] = testDf['MoSold'].apply(str)
 
-trainDf['OverallQual'] = trainDf['OverallQual'].pow(2)
+# trainDf['OverallQual'] = trainDf['OverallQual'].apply(np.log)
 # #trainDf['GrLivArea'] = trainDf['GrLivArea'].pow(3) #nope
-trainDf['GarageCars'] = trainDf['GarageCars'].pow(2)
-trainDf['GarageArea'] = trainDf['GarageArea'].pow(2)
+# trainDf['GarageCars'] = trainDf['GarageCars'].pow(2)
+# trainDf['GarageArea'] = trainDf['GarageArea'].pow(2)
 #
-testDf['OverallQual'] = testDf['OverallQual'].pow(2)
+# testDf['OverallQual'] = testDf['OverallQual'].apply(np.log)
 # #testDf['GrLivArea'] = testDf['GrLivArea'].pow(3)
-testDf['GarageCars'] = testDf['GarageCars'].pow(2)
-testDf['GarageArea'] = testDf['GarageArea'].pow(2)
+# testDf['GarageCars'] = testDf['GarageCars'].pow(2)
+# testDf['GarageArea'] = testDf['GarageArea'].pow(2)
 
 target = 'SalePrice'
 
@@ -110,7 +110,7 @@ def correlations(t_df):
 def cv(df, pipeline):
     iter_rmsle = []
     iteration = 0
-    kf = KFold(n_splits=5, random_state=0)
+    kf = KFold(n_splits=10, random_state=0)
     for train_idx, test_idx in kf.split(df):
         print("KFold iteration ", iteration)
         x_train, x_test = df.iloc[train_idx], df.iloc[test_idx]
@@ -128,12 +128,13 @@ def cv(df, pipeline):
     return np.mean(iter_rmsle)
 
 
-def train(t_df, make_pipelines):
+def select_pipeline(t_df, make_pipelines):
+    c_df = t_df.copy()
     rmsles = []
     pipelines = []
 
     for pipeline in make_pipelines():
-        mean = cv(t_df, pipeline)
+        mean = cv(c_df, pipeline)
 
         print("Mean RMSLE: ", mean)
         rmsles.append(mean)
@@ -146,7 +147,7 @@ def train(t_df, make_pipelines):
     best_pipeline = pipelines[min_index]
     print('Best pipeline', best_pipeline)
 
-    best_model = best_pipeline.fit(t_df, Y)
+    best_model = best_pipeline.fit(c_df, Y)
 
     print("RMSLES : ", rmsles)
 
@@ -194,6 +195,16 @@ def linear():
     return pipelines
 
 
+def lasso():
+    pipelines = []
+    for l in [0, 0.5, 0.7, 1.0, 1.5, 2]:
+        est = Lasso(alpha=l, copy_X=True, fit_intercept=True, max_iter=1000,
+                    normalize=False, positive=False, precompute=False, random_state=0,
+                    selection='cyclic', tol=0.0001, warm_start=False)
+        pipelines.append(Pipeline(steps=[('lr', est)]))
+    return pipelines
+
+
 def predict(model, testing):
     sp_id = testDf['Id']
 
@@ -206,25 +217,58 @@ def predict(model, testing):
     print("Submission file created")
 
 
+def stacking(training,
+             y,
+             test,
+             pipelines):
+
+    train, valid, y_train, y_valid = train_test_split(training, y, test_size=0.5)
+
+    meta_validation = []
+    meta_test = []
+
+    for alg in pipelines:
+        t_cpy = train.copy()
+        alg_model = alg.fit(t_cpy, y_train)
+
+        valid_pred = alg_model.predict(valid)
+        test_pred = alg_model.predict(test)
+
+        meta_validation.append(valid_pred)
+        meta_test.append(test_pred)
+
+    stacked_valid = np.column_stack(tuple(meta_validation))
+
+    stacked_test = np.column_stack(tuple(meta_test))
+
+    print("Stacked valid data: ", stacked_valid)
+
+    print("Stacked test data: ", stacked_test)
+
+    meta_alg = LinearRegression()
+
+    return meta_alg.fit(stacked_valid, y_valid), stacked_test
+
+
 train_data, test_data = prepare_data()
 
-cpy = train_data.copy()
+ridge_model, ridge_metrics = select_pipeline(train_data, ridge)
 
-ridge_model, rmsles3 = train(train_data, ridge)
+xgb_model, xgb_metrics = select_pipeline(train_data, xgb_regressor)
 
-xgb_model, rmsles1 = train(cpy.copy(), xgb_regressor)
+dt_model, dt_metrics = select_pipeline(train_data, decision_tree_regressor)
 
-dt_model, rmsles2 = train(cpy.copy(), decision_tree_regressor)
+linear_model, lr_metrics = select_pipeline(train_data, linear)
 
-linear_model, rmsles4 = train(cpy.copy(), linear)
+lasso_model, lasso_metrics = select_pipeline(train_data, lasso)
 
-min1 = np.min(rmsles1)
-min2 = np.min(rmsles2)
-min3 = np.min(rmsles3)
-min4 = np.min(rmsles4)
+labels = ['xgb', 'decision-tree', 'ridge', 'linear', "lasso"]
+mins = [np.min(xgb_metrics),
+        np.min(dt_metrics),
+        np.min(ridge_metrics),
+        np.min(lr_metrics),
+        np.min(lasso_metrics)]
 
-labels = ['xgb', 'decision-tree', 'ridge', 'linear']
-mins = [min1, min2, min3, min4]
 index = np.arange(len(labels))
 
 plt.bar(index, mins)
@@ -234,34 +278,10 @@ plt.ylabel('RMSLE')
 plt.xticks(index, labels, fontsize=10)
 plt.show()
 
-train, valid, y_train, y_valid = train_test_split(cpy.copy(), Y, test_size=0.4)
-
-meta_validation = []
-meta_test = []
-
-for alg in [xgb_model, dt_model, ridge_model, linear_model]:
-    alg_model = alg.fit(train, y_train)
-
-    valid_pred = alg_model.predict(valid)
-    test_pred = alg_model.predict(test_data)
-
-    meta_validation.append(valid_pred)
-    meta_test.append(test_pred)
-
-stacked_valid = np.column_stack((meta_validation[0],
-                                 meta_validation[1],
-                                 meta_validation[2]))
-
-stacked_test = np.column_stack((meta_test[0],
-                                meta_test[1],
-                                meta_test[2]))
-
-print("Stacked valid data: ", stacked_valid)
-
-print("Stacked test data: ", stacked_test)
-
-meta_alg = LinearRegression()
-
-meta_model = meta_alg.fit(stacked_valid, y_valid)
+meta_model, stacked_test = stacking(
+    train_data,
+    Y,
+    test_data,
+    [xgb_model, dt_model, ridge_model, linear_model, lasso_model])
 
 predict(meta_model, stacked_test)
