@@ -228,6 +228,7 @@ def stacking(training,
     meta_test = []
 
     for alg in pipelines:
+        #copy because algs with normalization will mutate the sata :(
         t_cpy = train.copy()
         alg_model = alg.fit(t_cpy, y_train)
 
@@ -278,10 +279,12 @@ plt.ylabel('RMSLE')
 plt.xticks(index, labels, fontsize=10)
 plt.show()
 
-meta_model, stack_test = stacking(
+meta_model, stacked_test = stacking(
     train_data,
     Y,
     test_data,
     [xgb_model, dt_model, ridge_model, linear_model, lasso_model])
 
-predict(meta_model, stack_test)
+predict(meta_model, stacked_test)
+
+#predict(xgb_model, test_data)
