@@ -263,12 +263,12 @@ plt.ylabel('RMSLE')
 plt.xticks(index, labels, fontsize=10)
 plt.show()
 
-meta_model, stacked_test = stacking(
+meta_model, stack_test = stacking(
     train_data,
     Y,
     test_data,
     [xgb_model, dt_model, ridge_model, linear_model])
 
-predict(meta_model, stacked_test)
+predict(meta_model, stack_test)
 
 # predict(xgb_model, test_data)
