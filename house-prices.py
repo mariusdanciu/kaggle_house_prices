@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import xgboost
 from scipy.stats import pearsonr
-from sklearn.linear_model import Ridge, LinearRegression, LassoCV
+from sklearn.linear_model import Ridge, LinearRegression, Lasso
 from sklearn.metrics import mean_squared_log_error
 from sklearn.model_selection import KFold
 from sklearn.pipeline import Pipeline
@@ -187,6 +187,14 @@ def linear():
     return pipelines
 
 
+def lasso():
+    pipelines = []
+    for l in [0, 0.5, 0.7, 1.0, 2.0, 3.0, 10, 20, 30, 50, 100, 300, 1000, 2000, 5000]:
+        est = Lasso(alpha=l, max_iter=10000, tol=0.01)
+        pipelines.append(Pipeline(steps=[('Lasso', est)]))
+    return pipelines
+
+
 def predict(model, testing):
     sp_id = testDf['Id']
 
@@ -249,7 +257,7 @@ train_data, test_data = prepare_data()
 correlations(train_data)
 
 print("Run Lasso")
-lasso_model = Pipeline(steps=[('lassocv', LassoCV(cv=10, random_state=10))]).fit(train_data, Y)
+lasso_model, lasso_metrics = select_pipeline(train_data, lasso)
 
 print("Run DT")
 dt_model, dt_metrics = select_pipeline(train_data, decision_tree_regressor)
@@ -263,11 +271,12 @@ ridge_model, ridge_metrics = select_pipeline(train_data, ridge)
 print("Run LR")
 linear_model, lr_metrics = select_pipeline(train_data, linear)
 
-labels = ['xgb', 'dt', 'ridge', 'linear']
+labels = ['xgb', 'dt', 'ridge', 'linear', 'lasso']
 mins = [np.min(xgb_metrics),
         np.min(dt_metrics),
         np.min(ridge_metrics),
-        np.min(lr_metrics)
+        np.min(lr_metrics),
+        np.min(lasso_metrics)
         ]
 
 index = np.arange(len(labels))
