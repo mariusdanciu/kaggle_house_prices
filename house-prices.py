@@ -6,13 +6,11 @@ import numpy as np
 import pandas as pd
 import xgboost
 from scipy.stats import pearsonr
-from sklearn.linear_model import Ridge, LinearRegression, Lasso
+from sklearn.linear_model import Ridge, LinearRegression, LassoCV
 from sklearn.metrics import mean_squared_log_error
 from sklearn.model_selection import KFold
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import Imputer
-from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeRegressor
 
 from MLE import MultiLabelEncoder
@@ -35,7 +33,7 @@ Y = trainDf[target]
 
 
 def prepare_data():
-    training = trainDf.drop(['Id', target], axis=1)
+    training = trainDf.drop(['Id'], axis=1)
     testing = testDf.drop(['Id'], axis=1)
 
     str_cols = []
@@ -56,6 +54,8 @@ def prepare_data():
         training[c] = training[c].fillna("$NULL")
         testing[c] = testing[c].fillna("$NULL")
 
+    # training = training.drop(training[(training['GrLivArea']>4000) & (training['SalePrice']<300000)].index)
+    training = training.drop([target], axis=1)
 
     print(training.dtypes)
     print(training.head(10))
@@ -152,7 +152,7 @@ def decision_tree_regressor():
                                     min_impurity_split=None, min_samples_leaf=1,
                                     min_samples_split=split, min_weight_fraction_leaf=0.0,
                                     presort=False, random_state=10, splitter='best')
-        pipelines.append(Pipeline(steps=[('lr', est)]))
+        pipelines.append(Pipeline(steps=[('DecisionTreeRegressor', est)]))
     return pipelines
 
 
@@ -166,7 +166,7 @@ def xgb_regressor():
                                        objective='reg:linear', reg_alpha=0.2, reg_lambda=l,
                                        scale_pos_weight=1, seed=0, silent=True, subsample=0.8)
 
-        pipelines.append(Pipeline(steps=[('lr', est)]))
+        pipelines.append(Pipeline(steps=[('XGBRegressor', est)]))
 
     return pipelines
 
@@ -174,16 +174,16 @@ def xgb_regressor():
 def ridge():
     pipelines = []
     for l in [0, 0.5, 0.7, 1.0, 1.5, 2]:
-        est = Ridge(alpha=l, copy_X=False, fit_intercept=True, max_iter=None,
-                    normalize=True, random_state=10, solver='auto', tol=0.001)
-        pipelines.append(Pipeline(steps=[('lr', est)]))
+        est = Ridge(alpha=l, copy_X=True, fit_intercept=True, max_iter=None,
+                    normalize=True, random_state=10, solver='auto', tol=0.0001)
+        pipelines.append(Pipeline(steps=[('Ridge', est)]))
     return pipelines
 
 
 def linear():
     pipelines = []
     est = LinearRegression(normalize=True)
-    pipelines.append(Pipeline(steps=[('lr', est)]))
+    pipelines.append(Pipeline(steps=[('LinearRegression', est)]))
     return pipelines
 
 
@@ -203,37 +203,50 @@ def stacking(training,
              y,
              test,
              pipelines):
-    train, valid, y_train, y_valid = train_test_split(training, y, test_size=0.5)
+    kf = KFold(n_splits=5, random_state=10)
 
-    meta_validation = []
-    meta_test = []
+    validation_body = {
+    }
+    test_body = {
+    }
+    for p in pipelines:
+        validation_body['pred_' + p.steps[0][0]] = np.zeros(len(training.index))
+        test_body['pred_' + p.steps[0][0]] = np.zeros(len(test.index))
 
-    for alg in pipelines:
-        # copy because algs with normalization will mutate the sata :(
-        t_cpy = train.copy()
-        alg_model = alg.fit(t_cpy, y_train)
+    valid_df = pd.DataFrame(validation_body)
 
-        valid_pred = alg_model.predict(valid)
+    test_df = pd.DataFrame(test_body)
+
+    for train_idx, validation_idx in kf.split(training):
+        x_train, x_validation = training.iloc[train_idx], training.iloc[validation_idx]
+        y_train, y_validation = y[train_idx], y[validation_idx]
+
+        for col, alg in enumerate(pipelines):
+            t_cpy = x_train.copy()
+            alg_model = alg.fit(t_cpy, y_train)
+
+            valid_pred = alg_model.predict(x_validation)
+
+            valid_df.iloc[validation_idx, col] = valid_pred
+
+    for col, alg in enumerate(pipelines):
+        t_cpy = training.copy()
+        alg_model = alg.fit(t_cpy, y)
         test_pred = alg_model.predict(test)
 
-        meta_validation.append(valid_pred)
-        meta_test.append(test_pred)
+        test_df.iloc[:, col] = test_pred
 
-    stacked_valid = np.column_stack(tuple(meta_validation))
+    meta_alg = LinearRegression(normalize=True)
 
-    stacked_test = np.column_stack(tuple(meta_test))
-
-    print("Stacked valid data: ", stacked_valid)
-
-    print("Stacked test data: ", stacked_test)
-
-    meta_alg = LinearRegression()
-
-    return meta_alg.fit(stacked_valid, y_valid), stacked_test
+    return meta_alg.fit(valid_df, y), test_df
 
 
 train_data, test_data = prepare_data()
 
+correlations(train_data)
+
+print("Run Lasso")
+lasso_model = Pipeline(steps=[('lassocv', LassoCV(cv=10, random_state=10))]).fit(train_data, Y)
 
 print("Run DT")
 dt_model, dt_metrics = select_pipeline(train_data, decision_tree_regressor)
@@ -241,18 +254,18 @@ dt_model, dt_metrics = select_pipeline(train_data, decision_tree_regressor)
 print("Run XGB")
 xgb_model, xgb_metrics = select_pipeline(train_data, xgb_regressor)
 
-
 print("Run Ridge")
 ridge_model, ridge_metrics = select_pipeline(train_data, ridge)
 
 print("Run LR")
 linear_model, lr_metrics = select_pipeline(train_data, linear)
 
-labels = ['xgb', 'decision-tree', 'ridge', 'linear']
+labels = ['xgb', 'dt', 'ridge', 'linear']
 mins = [np.min(xgb_metrics),
         np.min(dt_metrics),
         np.min(ridge_metrics),
-        np.min(lr_metrics)]
+        np.min(lr_metrics)
+        ]
 
 index = np.arange(len(labels))
 
@@ -267,7 +280,7 @@ meta_model, stack_test = stacking(
     train_data,
     Y,
     test_data,
-    [xgb_model, dt_model, ridge_model, linear_model])
+    [xgb_model, dt_model, ridge_model, linear_model, lasso_model])
 
 predict(meta_model, stack_test)
 
