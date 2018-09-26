@@ -10,7 +10,7 @@ from sklearn.linear_model import Ridge, LinearRegression, LassoCV
 from sklearn.metrics import mean_squared_log_error
 from sklearn.model_selection import KFold
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import Imputer
+from sklearn.preprocessing import Imputer, RobustScaler
 from sklearn.tree import DecisionTreeRegressor
 
 from MLE import MultiLabelEncoder
@@ -64,7 +64,8 @@ def prepare_data():
 
     t_pipe = Pipeline(steps=[
         ('catencode', enc),
-        ('null_handler', Imputer(missing_values='NaN', strategy='mean', axis=0))
+        ('null_handler', Imputer(missing_values='NaN', strategy='mean', axis=0)),
+        ('rs', RobustScaler())
     ])
 
     fit_pipeline = t_pipe.fit(pd.concat([training, testing], axis=0))
@@ -159,12 +160,11 @@ def decision_tree_regressor():
 def xgb_regressor():
     pipelines = []
     for l in [0, 0.5, 0.7, 1.0, 1.5, 2]:
-        for d in range(3, 10):
-            est = xgboost.XGBRegressor(base_score=0.5, colsample_bylevel=1, colsample_bytree=0.8, gamma=0,
-                                       learning_rate=0.1, max_delta_step=0, max_depth=d,
-                                       min_child_weight=10, missing=None, n_estimators=300, nthread=-1,
-                                       objective='reg:linear', reg_alpha=0.2, reg_lambda=l,
-                                       scale_pos_weight=1, seed=0, silent=True, subsample=0.8)
+        est = xgboost.XGBRegressor(base_score=0.5, colsample_bylevel=1, colsample_bytree=0.8, gamma=0,
+                                   learning_rate=0.1, max_delta_step=0, max_depth=5,
+                                   min_child_weight=4, missing=None, n_estimators=700, nthread=-1,
+                                   objective='reg:linear', reg_alpha=0, reg_lambda=l,
+                                   scale_pos_weight=1, seed=10, silent=True, subsample=0.8)
 
         pipelines.append(Pipeline(steps=[('XGBRegressor', est)]))
 
@@ -175,14 +175,14 @@ def ridge():
     pipelines = []
     for l in [0, 0.5, 0.7, 1.0, 1.5, 2]:
         est = Ridge(alpha=l, copy_X=True, fit_intercept=True, max_iter=None,
-                    normalize=True, random_state=10, solver='auto', tol=0.0001)
+                    normalize=False, random_state=10, solver='auto', tol=0.0001)
         pipelines.append(Pipeline(steps=[('Ridge', est)]))
     return pipelines
 
 
 def linear():
     pipelines = []
-    est = LinearRegression(normalize=True)
+    est = LinearRegression(normalize=False)
     pipelines.append(Pipeline(steps=[('LinearRegression', est)]))
     return pipelines
 
@@ -221,20 +221,23 @@ def stacking(training,
         x_train, x_validation = training.iloc[train_idx], training.iloc[validation_idx]
         y_train, y_validation = y[train_idx], y[validation_idx]
 
-        for col, alg in enumerate(pipelines):
+        for alg in pipelines:
+            col_name = 'pred_' + alg.steps[0][0]
+
             t_cpy = x_train.copy()
             alg_model = alg.fit(t_cpy, y_train)
 
             valid_pred = alg_model.predict(x_validation)
 
-            valid_df.iloc[validation_idx, col] = valid_pred
+            valid_df.ix[validation_idx, col_name] = valid_pred
 
-    for col, alg in enumerate(pipelines):
+    for alg in pipelines:
+        col_name = 'pred_' + alg.steps[0][0]
         t_cpy = training.copy()
         alg_model = alg.fit(t_cpy, y)
         test_pred = alg_model.predict(test)
 
-        test_df.iloc[:, col] = test_pred
+        test_df.ix[:, col_name] = test_pred
 
     meta_alg = LinearRegression(normalize=True)
 
