@@ -147,24 +147,20 @@ def select_pipeline(t_df, make_pipelines):
 
 def decision_tree_regressor():
     pipelines = []
-    for split in range(2, 10):
-        est = DecisionTreeRegressor(criterion='mse', max_depth=None, max_features=None,
-                                    max_leaf_nodes=None, min_impurity_decrease=0.0,
-                                    min_impurity_split=None, min_samples_leaf=1,
-                                    min_samples_split=split, min_weight_fraction_leaf=0.0,
-                                    presort=False, random_state=10, splitter='best')
+    for d in range(2, 20):
+        est = DecisionTreeRegressor(max_depth=d, random_state=10)
         pipelines.append(Pipeline(steps=[('DecisionTreeRegressor', est)]))
     return pipelines
 
 
 def xgb_regressor():
     pipelines = []
-    for l in [0, 0.5, 0.7, 1.0, 1.5, 2]:
+    for l in [0, 0.5, 0.7, 1.0, 2]:
         est = xgboost.XGBRegressor(base_score=0.5, colsample_bylevel=1, colsample_bytree=0.8, gamma=0,
                                    learning_rate=0.1, max_delta_step=0, max_depth=5,
-                                   min_child_weight=4, missing=None, n_estimators=700, nthread=-1,
-                                   objective='reg:linear', reg_alpha=0, reg_lambda=l,
-                                   scale_pos_weight=1, seed=10, silent=True, subsample=0.8)
+                                   min_child_weight=1, missing=None, n_estimators=500, nthread=-1,
+                                   objective='reg:linear', reg_alpha=l, reg_lambda=0,
+                                   scale_pos_weight=1, seed=10, silent=True, subsample=1)
 
         pipelines.append(Pipeline(steps=[('XGBRegressor', est)]))
 
@@ -239,6 +235,8 @@ def stacking(training,
 
             valid_df.ix[validation_idx, col_name] = valid_pred
 
+    valid_df.to_csv("./stack_validation.csv", index=False)
+
     for alg in pipelines:
         col_name = 'pred_' + alg.steps[0][0]
         t_cpy = training.copy()
@@ -246,6 +244,8 @@ def stacking(training,
         test_pred = alg_model.predict(test)
 
         test_df.ix[:, col_name] = test_pred
+
+    test_df.to_csv("./stack_test.csv", index=False)
 
     meta_alg = LinearRegression(normalize=True)
 
@@ -255,6 +255,19 @@ def stacking(training,
 train_data, test_data = prepare_data()
 
 correlations(train_data)
+
+plt.subplot(1, 2, 1)
+plt.plot(train_data['OverallQual'], Y, 'o')
+
+plt.xlabel('OverallQual')
+plt.ylabel('SalePrice')
+
+plt.subplot(1, 2, 2)
+plt.plot(train_data['GrLivArea'], Y, 'o')
+
+plt.xlabel('GrLivArea')
+plt.ylabel('SalePrice')
+plt.show()
 
 print("Run Lasso")
 lasso_model, lasso_metrics = select_pipeline(train_data, lasso)
@@ -272,6 +285,7 @@ print("Run LR")
 linear_model, lr_metrics = select_pipeline(train_data, linear)
 
 labels = ['xgb', 'dt', 'ridge', 'linear', 'lasso']
+
 mins = [np.min(xgb_metrics),
         np.min(dt_metrics),
         np.min(ridge_metrics),
